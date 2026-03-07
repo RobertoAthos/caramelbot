@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from typing import Any
 
 import litellm
@@ -22,6 +23,8 @@ from app.tools import playwright, telegram
 
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "anthropic/claude-sonnet-4-20250514")
 
+FILE_PATH_RE = re.compile(r'(/[^\s,;\"\'<>]+\.\w{2,5})\b')
+
 # Tools available in the chat router (lightweight, no browser)
 ROUTER_TOOLS: list[dict] = [
     {
@@ -38,20 +41,6 @@ ROUTER_TOOLS: list[dict] = [
                     }
                 },
                 "required": ["question"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "telegram_msg",
-            "description": "Send a message to the operator via Telegram",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "Message text to send"}
-                },
-                "required": ["text"],
             },
         },
     },
@@ -144,35 +133,6 @@ SKILL_TOOLS: list[dict] = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "telegram_msg",
-            "description": "Send a message to the operator via Telegram",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "Message text to send"}
-                },
-                "required": ["text"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "telegram_send_file",
-            "description": "Send a file/document via Telegram",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string", "description": "Path to the file"},
-                    "caption": {"type": "string", "description": "Caption for the file", "default": ""},
-                },
-                "required": ["file_path"],
-            },
-        },
-    },
 ]
 
 # Keep BUILTIN_TOOLS as alias for backward compat
@@ -199,15 +159,6 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
             return json.dumps(result)
         if name == "browser_get_text":
             result = await playwright.get_text(arguments.get("selector", "body"))
-            return json.dumps(result)
-
-        if name == "telegram_msg":
-            result = await telegram.send_message(arguments["text"])
-            return json.dumps(result)
-        if name == "telegram_send_file":
-            result = await telegram.send_document(
-                arguments["file_path"], arguments.get("caption", "")
-            )
             return json.dumps(result)
 
         return json.dumps({"error": f"Unknown tool: {name}"})
@@ -310,6 +261,9 @@ async def chat(user_message: str, conversation_id: int | None = None) -> dict:
                     status = result.get("status", "COMPLETED")
                     save_message("assistant", f"[Skill {_fn_name}] {summary}", conversation_id=_conversation_id)
                     if status == "COMPLETED":
+                        paths = [p for p in FILE_PATH_RE.findall(summary) if os.path.isfile(p)]
+                        for path in paths:
+                            await telegram.send_document(path, caption=os.path.basename(path))
                         await telegram.send_message(f"[CaramelBot] Skill '{_skill.name}' finalizada:\n\n{summary}")
                     elif status == "FAILED":
                         await telegram.send_message(f"[CaramelBot] Skill '{_skill.name}' falhou:\n\n{summary}")
@@ -329,7 +283,7 @@ async def chat(user_message: str, conversation_id: int | None = None) -> dict:
                 "task_status": "RUNNING",
             }
 
-        # Handle router tools (ask_human, telegram_msg)
+        # Handle router tools (ask_human)
         if fn_name == "ask_human":
             question = fn_args["question"]
             await telegram.send_message(f"[CaramelBot] Preciso da sua ajuda:\n\n{question}")

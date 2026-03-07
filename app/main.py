@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
+import re
 import uvicorn
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core.database import (
@@ -18,6 +20,29 @@ from app.core.database import (
 )
 from app.core.engine import chat, run_task
 from app.core.skill_loader import load_skills
+from app.tools import telegram
+
+FILE_PATH_RE = re.compile(r'(/[^\s,;\"\'<>]+\.\w{2,5})\b')
+
+
+async def _send_to_telegram(result: dict) -> None:
+    """Envia o resultado para o Telegram automaticamente."""
+    if result.get("awaiting_input") or result.get("task_status") == "RUNNING":
+        return
+
+    response = result.get("response", "")
+    if not response:
+        return
+
+    try:
+        paths = [p for p in FILE_PATH_RE.findall(response) if os.path.isfile(p)]
+        for path in paths:
+            await telegram.send_document(path, caption=os.path.basename(path))
+        await telegram.send_message(response)
+    except Exception:
+        pass
+
+_tg_conversations: dict[int, int] = {}
 
 app = FastAPI(title="CaramelBot", version="0.2.0")
 
@@ -46,12 +71,33 @@ class ResumeTaskRequest(BaseModel):
 
 # --- Routes ---
 
+@app.post("/webhook/telegram")
+async def telegram_webhook(request: Request):
+    body = await request.json()
+    message = body.get("message") or body.get("edited_message")
+    if not message or "text" not in message:
+        return {"ok": True}
+
+    text = message["text"]
+    chat_id = message["chat"]["id"]
+
+    conversation_id = _tg_conversations.get(chat_id)
+    result = await chat(user_message=text, conversation_id=conversation_id)
+
+    if "conversation_id" in result:
+        _tg_conversations[chat_id] = result["conversation_id"]
+
+    await _send_to_telegram(result)
+    return {"ok": True}
+
+
 @app.post("/chat")
 async def api_chat(req: ChatRequest):
     """Natural language chat with automatic skill routing."""
     result = await chat(user_message=req.message, conversation_id=req.conversation_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
+    await _send_to_telegram(result)
     return result
 
 
@@ -94,6 +140,7 @@ async def api_run_task(req: RunSkillRequest):
     result = await run_task(skill_name=req.skill_name, user_input=req.input)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
+    await _send_to_telegram(result)
     return result
 
 
@@ -111,6 +158,7 @@ async def api_resume_task(req: ResumeTaskRequest):
         user_input=req.human_response,
         task_id=req.task_id,
     )
+    await _send_to_telegram(result)
     return result
 
 
