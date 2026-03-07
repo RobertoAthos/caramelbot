@@ -157,7 +157,3 @@ tools: [mcp_playwright]
 - **SQLModel** + **SQLite** — Persistence (conversations, tasks, messages)
 - **Playwright via MCP** — Browser automation (stdio transport)
 - **httpx** — Telegram Bot API client
-
-## License
-
-See [LICENSE](LICENSE) for details.
