@@ -1,0 +1,29 @@
+[project]
+name = "caramelbot"
+version = "0.1.0"
+description = "Framework de agentes minimalista com skills em Markdown e Human-in-the-Loop"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "litellm>=1.55.0",
+    "sqlmodel>=0.0.22",
+    "python-telegram-bot>=21.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.28.0",
+]
+
+[project.scripts]
+caramelbot = "app.main:start"
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
