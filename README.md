@@ -134,6 +134,49 @@ tools: [mcp_playwright]
 - **`ask_human`** — Always available. Pauses the agent and sends a question to the user via Telegram
 - **Playwright browser tools** — Enabled when `tools: [mcp_playwright]` is set. Provides full browser control (navigate, click, fill, screenshot, etc.)
 
+## Architecture
+
+```mermaid
+flowchart TD
+    TG["Telegram"] -->|webhook| FA["FastAPI Server"]
+    REST["REST /chat"] -->|POST| FA
+
+    FA --> ROUTER["Chat Router"]
+
+    SKILLS["Skills (.md)"] --> ROUTER
+    ROUTER <-->|read/write| DB["SQLite DB"]
+
+    ROUTER --> LLM["LLM (litellm)"]
+    LLM --> DEC{Skill?}
+
+    DEC -- No --> RESP["Chat Response"]
+    RESP -.->|send| TG_OUT["Telegram"]
+
+    DEC -- Yes --> AGENT["Agent Loop (20 iters)"]
+    AGENT -.->|result| TG_OUT
+
+    AGENT --> PW["Playwright MCP"]
+    AGENT --> AH["ask_human"]
+
+    AH --> AWAIT["AWAITING_INPUT"]
+    AWAIT -.->|resume| AGENT
+
+    style TG fill:#a5d8ff,stroke:#4a9eed
+    style REST fill:#a5d8ff,stroke:#4a9eed
+    style TG_OUT fill:#a5d8ff,stroke:#4a9eed
+    style FA fill:#d0bfff,stroke:#8b5cf6
+    style ROUTER fill:#d0bfff,stroke:#8b5cf6
+    style AGENT fill:#d0bfff,stroke:#8b5cf6
+    style SKILLS fill:#ffd8a8,stroke:#f59e0b
+    style DB fill:#c3fae8,stroke:#22c55e
+    style LLM fill:#fff3bf,stroke:#f59e0b
+    style DEC fill:#fff3bf,stroke:#f59e0b
+    style RESP fill:#b2f2bb,stroke:#22c55e
+    style PW fill:#b2f2bb,stroke:#22c55e
+    style AH fill:#ffc9c9,stroke:#ef4444
+    style AWAIT fill:#ffc9c9,stroke:#ef4444
+```
+
 ## How It Works
 
 1. **User sends a message** via Telegram or the `/chat` API
