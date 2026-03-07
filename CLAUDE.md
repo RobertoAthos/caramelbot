@@ -36,7 +36,7 @@ There are no tests or linting configured yet.
 - **`app/core/database.py`** — SQLModel/SQLite persistence. Models: `Conversation`, `Task` (with status machine: RUNNING → AWAITING_INPUT → COMPLETED/FAILED), `Message`
 - **`app/core/skill_loader.py`** — Parses Markdown files from `skills/` directory. Skills have YAML frontmatter (name, description, tools) and Markdown body (instructions)
 - **`app/tools/telegram.py`** — Telegram Bot API client (send messages, documents, long-poll)
-- **`app/tools/playwright.py`** — Proxy to MCP Playwright server via JSON-RPC for browser automation
+- **`app/tools/playwright.py`** — MCP Playwright client using stdio transport (spawns `npx @modelcontextprotocol/server-playwright` as subprocess)
 
 ### Skills System
 
@@ -59,15 +59,15 @@ Skills are dynamically loaded and exposed to the chat router as LLM tool definit
 Configured via `.env` (loaded with python-dotenv):
 - `DEFAULT_MODEL` — litellm model identifier (default: `anthropic/claude-sonnet-4-20250514`)
 - `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` — Telegram bot credentials
-- `PLAYWRIGHT_MCP_URL` — MCP Playwright server endpoint (default: `http://localhost:3000`)
 - `DATABASE_URL` — SQLite connection string (default: `sqlite:///caramelbot.db`)
 - LLM API keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`
+- **Node.js/npx** must be installed for MCP Playwright (spawned automatically via stdio)
 
 ### Tool Sets
 
 Two distinct tool sets exist in the engine:
 - **`ROUTER_TOOLS`** — Only `ask_human`; used by the chat router
-- **`SKILL_TOOLS`** — `ask_human` + browser tools (`browser_navigate`, `browser_click`, `browser_fill`, `browser_screenshot`, `browser_get_text`); used inside skill agent loops
+- **`BUILTIN_SKILL_TOOLS`** — Only `ask_human`; browser tools are dynamically fetched from MCP Playwright server (stdio transport) when a skill declares `tools: [mcp_playwright]`
 
 ## Language
 

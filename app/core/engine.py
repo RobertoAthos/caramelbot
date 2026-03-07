@@ -19,6 +19,8 @@ from app.core.database import (
     update_task_status,
 )
 from app.core.skill_loader import Skill, load_skills
+from mcp import ClientSession
+
 from app.tools import playwright, telegram
 
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "anthropic/claude-sonnet-4-20250514")
@@ -46,8 +48,8 @@ ROUTER_TOOLS: list[dict] = [
     },
 ]
 
-# All tools available inside a skill agent loop
-SKILL_TOOLS: list[dict] = [
+# Built-in tools available inside a skill agent loop (non-MCP)
+BUILTIN_SKILL_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
@@ -65,101 +67,19 @@ SKILL_TOOLS: list[dict] = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "browser_navigate",
-            "description": "Navigate the browser to a URL",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "URL to navigate to"}
-                },
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "browser_click",
-            "description": "Click an element in the browser",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "selector": {"type": "string", "description": "CSS selector of the element"}
-                },
-                "required": ["selector"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "browser_fill",
-            "description": "Fill a form field in the browser",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "selector": {"type": "string", "description": "CSS selector of the field"},
-                    "value": {"type": "string", "description": "Value to fill"},
-                },
-                "required": ["selector", "value"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "browser_screenshot",
-            "description": "Take a screenshot of the current browser page",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "browser_get_text",
-            "description": "Get text content from the browser page",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "selector": {
-                        "type": "string",
-                        "description": "CSS selector (defaults to body)",
-                        "default": "body",
-                    }
-                },
-            },
-        },
-    },
 ]
 
-# Keep BUILTIN_TOOLS as alias for backward compat
-BUILTIN_TOOLS = SKILL_TOOLS
 
-
-async def handle_tool_call(name: str, arguments: dict) -> str:
+async def handle_tool_call(
+    name: str, arguments: dict, mcp_session: ClientSession | None = None
+) -> str:
     """Execute a tool call and return its result as a string."""
     try:
         if name == "ask_human":
             return json.dumps({"status": "awaiting_input", "question": arguments["question"]})
 
-        if name == "browser_navigate":
-            result = await playwright.navigate(arguments["url"])
-            return json.dumps(result)
-        if name == "browser_click":
-            result = await playwright.click(arguments["selector"])
-            return json.dumps(result)
-        if name == "browser_fill":
-            result = await playwright.fill(arguments["selector"], arguments["value"])
-            return json.dumps(result)
-        if name == "browser_screenshot":
-            result = await playwright.screenshot()
-            return json.dumps(result)
-        if name == "browser_get_text":
-            result = await playwright.get_text(arguments.get("selector", "body"))
-            return json.dumps(result)
+        if mcp_session is not None:
+            return await playwright.call_tool(mcp_session, name, arguments)
 
         return json.dumps({"error": f"Unknown tool: {name}"})
     except Exception as e:
@@ -359,6 +279,26 @@ async def run_skill_task(
 
     Returns a dict with task_id, status, and result.
     """
+    needs_mcp = "mcp_playwright" in (skill.tools or [])
+
+    if needs_mcp:
+        async with playwright.open_session() as mcp_session:
+            mcp_tools = await playwright.get_tool_definitions(mcp_session)
+            tools = BUILTIN_SKILL_TOOLS + mcp_tools
+            return await _run_agent_loop(skill, user_input, conversation_id, task_id, tools, mcp_session)
+    else:
+        return await _run_agent_loop(skill, user_input, conversation_id, task_id, BUILTIN_SKILL_TOOLS, None)
+
+
+async def _run_agent_loop(
+    skill: Skill,
+    user_input: str,
+    conversation_id: int | None,
+    task_id: int | None,
+    tools: list[dict],
+    mcp_session: ClientSession | None,
+) -> dict:
+    """Inner agent loop shared by MCP and non-MCP skill tasks."""
     # Create or resume task
     if task_id is None:
         task = create_task(skill.name, {"input": user_input}, conversation_id=conversation_id)
@@ -380,7 +320,7 @@ async def run_skill_task(
         response = await litellm.acompletion(
             model=DEFAULT_MODEL,
             messages=messages,
-            tools=SKILL_TOOLS,
+            tools=tools,
             tool_choice="auto",
         )
 
@@ -428,8 +368,8 @@ async def run_skill_task(
                     "question": question,
                 }
 
-            # Execute other tools
-            result_str = await handle_tool_call(fn_name, fn_args)
+            # Execute other tools (MCP or built-in)
+            result_str = await handle_tool_call(fn_name, fn_args, mcp_session)
             save_message("tool", result_str, task_id=task_id)
             messages.append(
                 {
