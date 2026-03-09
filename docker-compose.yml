@@ -9,15 +9,7 @@ services:
       - ./skills:/app/skills
       - db-data:/app/data
     environment:
-      - DATABASE_URL=sqlite:///data/caramelbot.db
-    depends_on:
-      - playwright
-    restart: unless-stopped
-
-  playwright:
-    image: mcr.microsoft.com/playwright/mcp:latest
-    ports:
-      - "3000:3000"
+      - DATABASE_URL=sqlite:///data/caramelbot.db    
     restart: unless-stopped
 
 volumes:
