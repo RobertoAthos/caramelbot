@@ -12,6 +12,7 @@ COPY pyproject.toml uv.lock* ./
 RUN uv sync --no-dev --no-install-project
 
 # Copy application code
+COPY README.md ./
 COPY app/ app/
 COPY skills/ skills/
 
