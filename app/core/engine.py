@@ -23,7 +23,7 @@ from mcp import ClientSession
 
 from app.tools import playwright, telegram
 
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "anthropic/claude-sonnet-4-20250514")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-5-nano-2025-08-07")
 
 FILE_PATH_RE = re.compile(r'(/[^\s,;\"\'<>]+\.\w{2,5})\b')
 
